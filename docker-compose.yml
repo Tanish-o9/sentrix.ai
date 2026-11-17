@@ -1,0 +1,11 @@
+services:
+  sentrix:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - DJANGO_SETTINGS_MODULE=sentrix_backend.settings
+    volumes:
+      - .:/app
+      - ./workspaces:/app/workspaces
