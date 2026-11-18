@@ -166,6 +166,41 @@ def derive_code_block(prompt: str) -> tuple[str, list[str]]:
 def create_valid_code_patch(workspace_path: str, target_rel_file: str, prompt: str) -> str:
     """Generates a mathematically valid unified diff with real context lines from target file."""
     path = Path(workspace_path)
+
+    # Support creating LICENSE file directly
+    if "license" in prompt.lower() or target_rel_file == "LICENSE":
+        lines = [
+            "MIT License",
+            "",
+            "Copyright (c) 2026 SENTRIX.ai",
+            "",
+            "Permission is hereby granted, free of charge, to any person obtaining a copy",
+            "of this software and associated documentation files (the \"Software\"), to deal",
+            "in the Software without restriction, including without limitation the rights",
+            "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell",
+            "copies of the Software, and to permit persons to whom the Software is",
+            "furnished to do so, subject to the following conditions:",
+            "",
+            "The above copyright notice and this permission notice shall be included in all",
+            "copies or substantial portions of the Software.",
+            "",
+            "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR",
+            "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,",
+            "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE",
+            "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER",
+            "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,",
+            "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE",
+            "SOFTWARE.",
+        ]
+        add_str = "\n".join([f"+{l}" for l in lines])
+        return (
+            "diff --git a/LICENSE b/LICENSE\n"
+            "new file mode 100644\n"
+            "--- /dev/null\n"
+            "+++ b/LICENSE\n"
+            f"@@ -0,0 +1,{len(lines)} @@\n"
+            f"{add_str}\n"
+        )
     file_path = path / target_rel_file
     if not file_path.exists():
         for py in path.rglob("*.py"):

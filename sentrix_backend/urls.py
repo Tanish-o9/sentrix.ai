@@ -5,6 +5,7 @@ urlpatterns = [
     path("", views.dashboard_view, name="dashboard"),
     path("ast/", views.ast_view, name="ast-view"),
     path("settings/api-key/", views.set_api_key, name="set-api-key"),
+    path("settings/api-status/", views.get_api_status, name="api-status"),
     path("projects/", views.project_list_create, name="project-list-create"),
     path("tasks/", views.task_list_create, name="task-list-create"),
     path("tasks/<int:task_id>/", views.task_detail, name="task-detail"),

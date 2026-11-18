@@ -104,6 +104,11 @@ def _safe_validate(model_cls, content):
 
 def get_target_file(files: list[str], prompt: str) -> str:
     """Selects the most appropriate repository file to modify for the given prompt."""
+    low = prompt.lower()
+    if "license" in low:
+        return "LICENSE"
+    if "readme" in low:
+        return "README.md"
     if not files:
         return "sentrix_backend/views.py"
     prompt_words = prompt.lower().split()
