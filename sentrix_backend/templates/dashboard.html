@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SENTRIX.ai — Autonomous AI Software Engineering Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    code, pre, .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .diff-line-add { background-color: rgba(16, 185, 129, 0.15); color: #34d399; }
+    .diff-line-del { background-color: rgba(239, 68, 68, 0.15); color: #f87171; }
+    .diff-line-hdr { background-color: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-[#090d16] text-slate-100 min-h-screen flex">
+
+  <!-- Left Sidebar -->
+  <aside class="w-64 bg-[#0d1322] border-r border-slate-800/80 flex flex-col shrink-0">
+    <div class="p-6 border-b border-slate-800/80 flex items-center gap-3">
+      <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+        <i data-lucide="cpu" class="w-6 h-6 text-white"></i>
+      </div>
+      <div>
+        <h1 class="text-xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-400 bg-clip-text text-transparent">SENTRIX.ai</h1>
+        <p class="text-[10px] tracking-wider uppercase font-semibold text-cyan-400/80">Autonomous SE</p>
+      </div>
+    </div>
+
+    <!-- Nav Items -->
+    <nav class="p-4 space-y-1.5 flex-1">
+      <button onclick="switchTab('tasks')" id="nav-tasks" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 transition">
+        <i data-lucide="layers" class="w-4 h-4"></i> Engineering Tasks
+      </button>
+      <button onclick="switchTab('pipeline')" id="nav-pipeline" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition">
+        <i data-lucide="git-merge" class="w-4 h-4"></i> Agent Architecture
+      </button>
+      <button onclick="switchTab('repo')" id="nav-repo" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition">
+        <i data-lucide="folder-tree" class="w-4 h-4"></i> Repo Intelligence (AST)
+      </button>
+    </nav>
+
+    <!-- Architecture Callout -->
+    <div class="p-4 m-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2 text-xs">
+      <div class="flex items-center gap-2 text-cyan-300 font-semibold">
+        <i data-lucide="shield-check" class="w-4 h-4"></i> Strict Separation
+      </div>
+      <p class="text-slate-400 text-[11px] leading-relaxed">
+        <strong class="text-slate-300">Django:</strong> DB, Git Clones, Guardrails<br>
+        <strong class="text-slate-300">Agno:</strong> Planner, Dev, Debugger, Reviewer
+      </p>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="flex-1 overflow-y-auto">
+    <!-- Top Header -->
+    <header class="h-16 border-b border-slate-800/80 bg-[#0d1322]/50 backdrop-blur px-8 flex items-center justify-between sticky top-0 z-30">
+      <div class="flex items-center gap-4">
+        <span class="text-xs font-mono px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">SENTRIX v1.0</span>
+        <span class="flex items-center gap-2 text-xs text-emerald-400">
+          <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span> Django Engine Online
+        </span>
+      </div>
+      <div class="flex items-center gap-3">
+        <button onclick="openSettingsModal()" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 text-xs font-medium transition border border-indigo-500/30">
+          <i data-lucide="key" class="w-3.5 h-3.5"></i> Configure LLM API Key
+        </button>
+        <button onclick="refreshData()" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition border border-slate-700">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+        </button>
+      </div>
+    </header>
+
+    <div class="p-8 space-y-8 max-w-7xl mx-auto">
+      
+      <!-- Metrics Overview -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-[#0e1628] border border-slate-800 rounded-xl p-5 shadow-lg">
+          <div class="flex justify-between items-start">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Tasks</span>
+            <div class="p-2 rounded-lg bg-cyan-500/10 text-cyan-400"><i data-lucide="terminal" class="w-4 h-4"></i></div>
+          </div>
+          <p id="stat-total" class="text-2xl font-bold mt-2 text-white">0</p>
+        </div>
+        <div class="bg-[#0e1628] border border-slate-800 rounded-xl p-5 shadow-lg">
+          <div class="flex justify-between items-start">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Agno Patches</span>
+            <div class="p-2 rounded-lg bg-indigo-500/10 text-indigo-400"><i data-lucide="sparkles" class="w-4 h-4"></i></div>
+          </div>
+          <p id="stat-patches" class="text-2xl font-bold mt-2 text-white">0</p>
+        </div>
+        <div class="bg-[#0e1628] border border-slate-800 rounded-xl p-5 shadow-lg">
+          <div class="flex justify-between items-start">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Awaiting Human</span>
+            <div class="p-2 rounded-lg bg-amber-500/10 text-amber-400"><i data-lucide="user-check" class="w-4 h-4"></i></div>
+          </div>
+          <p id="stat-awaiting" class="text-2xl font-bold mt-2 text-white">0</p>
+        </div>
+        <div class="bg-[#0e1628] border border-slate-800 rounded-xl p-5 shadow-lg">
+          <div class="flex justify-between items-start">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Approved & PR'd</span>
+            <div class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400"><i data-lucide="git-pull-request" class="w-4 h-4"></i></div>
+          </div>
+          <p id="stat-approved" class="text-2xl font-bold mt-2 text-white">0</p>
+        </div>
+      </div>
+
+      <!-- TAB 1: TASKS VIEW -->
+      <section id="view-tasks" class="space-y-6">
+        <!-- Create Task Card -->
+        <div class="bg-[#0e1628] border border-slate-800 rounded-2xl p-6 shadow-xl">
+          <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2 mb-2">
+            <i data-lucide="plus-circle" class="w-5 h-5 text-cyan-400"></i> Dispatch Autonomous Engineering Task
+          </h2>
+          <p class="text-xs text-slate-400 mb-4">Provide your GitHub Repository URL and description. Django prepares the workspace, and Agno agents analyze AST to generate the patch.</p>
+          
+          <form id="taskForm" class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <!-- Repo URL Input -->
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">GitHub Repo URL or Local Path</label>
+                <input id="repoUrlInput" type="text"
+                       placeholder="e.g. https://github.com/Tanish-o9/repo-name or ./"
+                       class="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition" />
+              </div>
+              <!-- Task Prompt Input -->
+              <div class="md:col-span-2">
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Task Description / Engineering Request</label>
+                <div class="flex gap-2">
+                  <input id="promptInput" type="text" required
+                         placeholder="e.g. Add rate-limiting and token expiry to auth views"
+                         class="flex-1 bg-slate-900 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition" />
+                  <button type="submit" class="bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition shadow-lg shadow-cyan-500/20 flex items-center gap-2 shrink-0">
+                    <i data-lucide="send" class="w-4 h-4"></i> Dispatch
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick Presets -->
+            <div class="flex flex-wrap items-center gap-2 pt-1 text-xs">
+              <span class="text-slate-500 font-medium">Quick Presets:</span>
+              <button type="button" onclick="setPreset('Add rate-limiting and token expiry to auth views')" class="px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">Rate Limiting</button>
+              <button type="button" onclick="setPreset('Fix SQL injection vulnerability in search query')" class="px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">SQLi Fix</button>
+              <button type="button" onclick="setPreset('Add health check endpoint and monitoring ping')" class="px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">Health Check</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Task List -->
+        <div class="bg-[#0e1628] border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+          <div class="flex justify-between items-center">
+            <h3 class="font-bold text-slate-200 text-base">Active Engineering Tasks</h3>
+            <span id="taskCountBadge" class="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded-full border border-slate-700">0 tasks</span>
+          </div>
+          <div id="taskList" class="divide-y divide-slate-800/80">
+            <p class="text-slate-500 text-sm py-4">Loading tasks...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: AGENT PIPELINE VISUALIZER -->
+      <section id="view-pipeline" class="hidden space-y-6">
+        <div class="bg-[#0e1628] border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+          <div>
+            <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+              <i data-lucide="git-merge" class="w-5 h-5 text-indigo-400"></i> Agno Multi-Agent & Trusted Execution Workflow
+            </h2>
+            <p class="text-xs text-slate-400 mt-1">Shows how Agno AI planning connects with Django trusted execution boundaries.</p>
+          </div>
+
+          <!-- Flowchart Grid -->
+          <div class="grid grid-cols-1 md:grid-cols-6 gap-3 pt-4">
+            <div class="bg-slate-900 border border-cyan-500/30 rounded-xl p-4 text-center space-y-2">
+              <div class="h-8 w-8 mx-auto rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs">1</div>
+              <h4 class="font-bold text-xs text-cyan-300">Planner Agent</h4>
+              <p class="text-[11px] text-slate-400">Extracts specs, criteria, and risks</p>
+            </div>
+            <div class="bg-slate-900 border border-indigo-500/30 rounded-xl p-4 text-center space-y-2">
+              <div class="h-8 w-8 mx-auto rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-xs">2</div>
+              <h4 class="font-bold text-xs text-indigo-300">Developer Agent</h4>
+              <p class="text-[11px] text-slate-400">Proposes unified git patch</p>
+            </div>
+            <div class="bg-slate-900 border border-purple-500/30 rounded-xl p-4 text-center space-y-2">
+              <div class="h-8 w-8 mx-auto rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-xs">3</div>
+              <h4 class="font-bold text-xs text-purple-300">QA Sandbox</h4>
+              <p class="text-[11px] text-slate-400">Executes pytest & tests safely</p>
+            </div>
+            <div class="bg-slate-900 border border-pink-500/30 rounded-xl p-4 text-center space-y-2">
+              <div class="h-8 w-8 mx-auto rounded-lg bg-pink-500/20 text-pink-400 flex items-center justify-center font-bold text-xs">4</div>
+              <h4 class="font-bold text-xs text-pink-300">Debugger Agent</h4>
+              <p class="text-[11px] text-slate-400">Bounded repairs if tests fail</p>
+            </div>
+            <div class="bg-slate-900 border border-amber-500/30 rounded-xl p-4 text-center space-y-2">
+              <div class="h-8 w-8 mx-auto rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xs">5</div>
+              <h4 class="font-bold text-xs text-amber-300">Human Approval</h4>
+              <p class="text-[11px] text-slate-400">Cryptographic hash lock</p>
+            </div>
+            <div class="bg-slate-900 border border-emerald-500/30 rounded-xl p-4 text-center space-y-2">
+              <div class="h-8 w-8 mx-auto rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs">6</div>
+              <h4 class="font-bold text-xs text-emerald-300">GitHub Draft PR</h4>
+              <p class="text-[11px] text-slate-400">Branch & Pull Request created</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: REPO INTELLIGENCE (AST) -->
+      <section id="view-repo" class="hidden space-y-6">
+        <div class="bg-[#0e1628] border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+                <i data-lucide="file-code" class="w-5 h-5 text-cyan-400"></i> Abstract Syntax Tree (AST) Scanner
+              </h2>
+              <p class="text-xs text-slate-400 mt-1">Non-executable static analysis of repository symbols performed by Django services.</p>
+            </div>
+            <button onclick="loadAstData()" class="px-3 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-300 text-xs font-semibold hover:bg-cyan-600/30 transition">
+              Scan Codebase
+            </button>
+          </div>
+          <pre id="astOutput" class="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 max-h-96 overflow-y-auto">Click 'Scan Codebase' to inspect repository AST...</pre>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- DIFF INSPECTION & APPROVAL MODAL -->
+  <div id="diffModal" class="hidden fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div class="bg-[#0e1628] border border-slate-700/80 rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+      
+      <!-- Modal Header -->
+      <div class="p-6 border-b border-slate-800 flex justify-between items-start bg-slate-900/60">
+        <div>
+          <div class="flex items-center gap-3">
+            <h3 class="font-bold text-lg text-slate-100" id="modalTitle">Patch Review & Human Approval Gate</h3>
+            <span id="modalStatusBadge" class="text-xs px-2.5 py-0.5 rounded-full font-medium"></span>
+          </div>
+          <p class="text-xs text-cyan-400 font-mono mt-1" id="modalRepo"></p>
+          <p class="text-xs text-slate-300 font-semibold mt-1" id="modalPrompt"></p>
+        </div>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+        
+        <!-- Hash Pill -->
+        <div class="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3.5 flex items-center justify-between">
+          <div class="space-y-1">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-amber-400">Cryptographic Patch Hash (SHA-256)</span>
+            <p id="modalHash" class="font-mono text-amber-300 break-all text-[11px]"></p>
+          </div>
+          <span class="px-2 py-1 rounded bg-amber-500/20 text-amber-300 text-[10px] font-semibold uppercase">Exact Bytes Lock</span>
+        </div>
+
+        <!-- Acceptance Plan -->
+        <div id="modalPlanContainer" class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-2">
+          <h4 class="font-bold text-slate-200 flex items-center gap-2">
+            <i data-lucide="clipboard-check" class="w-4 h-4 text-cyan-400"></i> Agno Planner Acceptance Criteria
+          </h4>
+          <ul id="modalCriteria" class="list-disc list-inside space-y-1 text-slate-300"></ul>
+        </div>
+
+        <!-- Unified Diff -->
+        <div class="space-y-2">
+          <div class="flex justify-between items-center">
+            <span class="font-semibold text-slate-300 flex items-center gap-2">
+              <i data-lucide="file-diff" class="w-4 h-4 text-indigo-400"></i> Proposed Unified Diff (Developer Agent)
+            </span>
+            <span class="text-[10px] text-slate-500">Read-Only Patch</span>
+          </div>
+          <div id="modalDiffFormatted" class="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-[11px] leading-relaxed overflow-x-auto max-h-72"></div>
+        </div>
+
+        <!-- PR URL if already approved -->
+        <div id="modalPrContainer" class="hidden bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 space-y-1">
+          <span class="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">GitHub Draft PR Live</span>
+          <p><a id="modalPrLink" href="#" target="_blank" class="text-cyan-400 hover:underline font-mono break-all font-semibold"></a></p>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-6 border-t border-slate-800 bg-slate-900/60 flex justify-between items-center">
+        <span class="text-[11px] text-slate-500">Human signature required for deployment.</span>
+        <div class="flex gap-3">
+          <button onclick="handleApproval('REJECTED')" class="px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 font-medium text-xs transition border border-rose-500/30">
+            Reject Patch
+          </button>
+          <button id="approveBtn" onclick="handleApproval('APPROVED')" class="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs transition shadow-lg shadow-emerald-600/20 flex items-center gap-2">
+            <i data-lucide="check" class="w-4 h-4"></i> Approve & Open GitHub PR
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL (LLM API KEY) -->
+  <div id="settingsModal" class="hidden fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div class="bg-[#0e1628] border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <h3 class="font-bold text-base text-slate-100 flex items-center gap-2">
+          <i data-lucide="settings" class="w-4 h-4 text-cyan-400"></i> Configure LLM Provider & Key
+        </h3>
+        <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-white">&times;</button>
+      </div>
+      <form id="settingsForm" class="space-y-4 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Provider</label>
+          <select id="llmProvider" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:border-cyan-500">
+            <option value="gemini">Google Gemini (Gemini 2.0 Flash)</option>
+            <option value="openai">OpenAI (GPT-4o)</option>
+            <option value="groq">Groq (Llama 3.3 70B)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">API Key</label>
+          <input id="llmKeyInput" type="password" required placeholder="AIzaSy... or sk-..."
+                 class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-100 font-mono focus:outline-none focus:border-cyan-500" />
+        </div>
+        <button type="submit" class="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 rounded-lg text-white font-semibold">
+          Save & Activate Key
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let activeTaskId = null;
+    let activePatchHash = null;
+
+    function switchTab(tab) {
+      ['tasks', 'pipeline', 'repo'].forEach(t => {
+        document.getElementById(`view-${t}`).classList.add('hidden');
+        const btn = document.getElementById(`nav-${t}`);
+        if (btn) btn.className = "w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition";
+      });
+      document.getElementById(`view-${tab}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`nav-${tab}`);
+      if (activeBtn) activeBtn.className = "w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 transition";
+      lucide.createIcons();
+    }
+
+    function setPreset(text) {
+      document.getElementById('promptInput').value = text;
+    }
+
+    async function refreshData() {
+      await loadTasks();
+    }
+
+    async function loadTasks() {
+      const res = await fetch('/api/tasks/');
+      const data = await res.json();
+      const container = document.getElementById('taskList');
+      const tasks = data.tasks || [];
+      
+      // Update metrics
+      document.getElementById('stat-total').innerText = tasks.length;
+      document.getElementById('stat-patches').innerText = tasks.filter(t => t.status !== 'CREATED').length;
+      document.getElementById('stat-awaiting').innerText = tasks.filter(t => t.status === 'AWAITING_APPROVAL').length;
+      document.getElementById('stat-approved').innerText = tasks.filter(t => t.status === 'APPROVED').length;
+      document.getElementById('taskCountBadge').innerText = `${tasks.length} tasks`;
+
+      if (!tasks.length) {
+        container.innerHTML = `<div class="py-12 text-center text-slate-500 text-sm">No tasks dispatched yet. Use the prompt box above to begin.</div>`;
+        return;
+      }
+
+      container.innerHTML = tasks.map(t => {
+        let badgeColor = "bg-slate-800 text-slate-400 border-slate-700";
+        if (t.status === 'AWAITING_APPROVAL') badgeColor = "bg-amber-500/20 text-amber-300 border-amber-500/30";
+        if (t.status === 'APPROVED') badgeColor = "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+        if (t.status === 'PLANNING' || t.status === 'CODING') badgeColor = "bg-cyan-500/20 text-cyan-300 border-cyan-500/30";
+
+        return `
+          <div class="py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-slate-900/30 px-3 rounded-xl transition">
+            <div class="space-y-1 max-w-xl">
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-xs text-slate-500">#${t.id}</span>
+                <span class="font-semibold text-slate-200 text-sm">${escapeHtml(t.prompt)}</span>
+                <span class="px-2 py-0.5 text-[10px] font-semibold uppercase rounded-full border ${badgeColor}">${t.status}</span>
+              </div>
+              <p class="text-[11px] text-cyan-400 font-mono">${escapeHtml(t.repo_url || 'Local Workspace')}</p>
+              <p class="text-[10px] text-slate-500">Created: ${new Date(t.created_at).toLocaleString()}</p>
+            </div>
+            <div class="flex items-center gap-2 self-end sm:self-center">
+              ${t.status === 'CREATED' ? `
+                <button onclick="runAgents(${t.id})" class="px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/20">
+                  <i data-lucide="play" class="w-3.5 h-3.5"></i> Run Agno Agents
+                </button>
+              ` : `
+                <button onclick="viewTask(${t.id})" class="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 flex items-center gap-1.5">
+                  <i data-lucide="eye" class="w-3.5 h-3.5"></i> Inspect Diff & Gate
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+      lucide.createIcons();
+    }
+
+    document.getElementById('taskForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const repo_url = document.getElementById('repoUrlInput').value.trim();
+      const prompt = document.getElementById('promptInput').value.trim();
+      
+      await fetch('/api/tasks/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({repo_url, prompt})
+      });
+      document.getElementById('promptInput').value = '';
+      loadTasks();
+    };
+
+    async function runAgents(id) {
+      const btn = event.currentTarget;
+      btn.innerHTML = `<span class="animate-spin inline-block mr-1">⌛</span> Agents Running...`;
+      btn.disabled = true;
+
+      try {
+        const res = await fetch(`/api/tasks/${id}/run/`, {method: 'POST'});
+        const data = await res.json();
+        loadTasks();
+        viewTask(id);
+      } catch(e) {
+        alert("Error running agents: " + e);
+        loadTasks();
+      }
+    }
+
+    async function viewTask(id) {
+      activeTaskId = id;
+      const res = await fetch(`/api/tasks/${id}/`);
+      const data = await res.json();
+
+      document.getElementById('modalTitle').innerText = `Task #${data.id} Patch Review`;
+      document.getElementById('modalRepo').innerText = `Target Repo: ${data.repo_url || 'Local Workspace'}`;
+      document.getElementById('modalPrompt').innerText = `Prompt: "${data.prompt}"`;
+      
+      const badge = document.getElementById('modalStatusBadge');
+      badge.innerText = data.status;
+      badge.className = data.status === 'APPROVED' ? "text-xs px-2.5 py-0.5 rounded-full font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "text-xs px-2.5 py-0.5 rounded-full font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30";
+
+      // Populate Criteria
+      const critUl = document.getElementById('modalCriteria');
+      if (data.plan && data.plan.acceptance_criteria) {
+        critUl.innerHTML = data.plan.acceptance_criteria.map(c => `<li>${c}</li>`).join('');
+      } else {
+        critUl.innerHTML = `<li>No plan generated yet.</li>`;
+      }
+
+      // Populate Diff
+      if (data.patch) {
+        activePatchHash = data.patch.patch_hash;
+        document.getElementById('modalHash').innerText = activePatchHash;
+        
+        const lines = data.patch.diff.split('\n');
+        const formatted = lines.map(line => {
+          if (line.startsWith('+')) return `<div class="diff-line-add px-2 py-0.5">${escapeHtml(line)}</div>`;
+          if (line.startsWith('-')) return `<div class="diff-line-del px-2 py-0.5">${escapeHtml(line)}</div>`;
+          if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) return `<div class="diff-line-hdr px-2 py-0.5">${escapeHtml(line)}</div>`;
+          return `<div class="text-slate-400 px-2 py-0.5">${escapeHtml(line)}</div>`;
+        }).join('');
+        document.getElementById('modalDiffFormatted').innerHTML = formatted;
+      }
+
+      // Show PR link if present
+      const prBox = document.getElementById('modalPrContainer');
+      const prLink = document.getElementById('modalPrLink');
+      const approveBtn = document.getElementById('approveBtn');
+      if (data.pr_url) {
+        prBox.classList.remove('hidden');
+        prLink.href = data.pr_url;
+        prLink.innerText = data.pr_url;
+        approveBtn.disabled = true;
+        approveBtn.classList.add('opacity-50');
+      } else {
+        prBox.classList.add('hidden');
+        approveBtn.disabled = false;
+        approveBtn.classList.remove('opacity-50');
+      }
+
+      document.getElementById('diffModal').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeModal() {
+      document.getElementById('diffModal').classList.add('hidden');
+    }
+
+    function openSettingsModal() {
+      document.getElementById('settingsModal').classList.remove('hidden');
+    }
+
+    function closeSettingsModal() {
+      document.getElementById('settingsModal').classList.add('hidden');
+    }
+
+    document.getElementById('settingsForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const provider = document.getElementById('llmProvider').value;
+      const api_key = document.getElementById('llmKeyInput').value.trim();
+      const res = await fetch('/api/settings/api-key/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({provider, api_key})
+      });
+      const data = await res.json();
+      alert(data.message || data.error);
+      closeSettingsModal();
+    };
+
+    async function handleApproval(decision) {
+      const res = await fetch(`/api/tasks/${activeTaskId}/approve/`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({patch_hash: activePatchHash, decision})
+      });
+      const data = await res.json();
+      closeModal();
+      loadTasks();
+    }
+
+    async function loadAstData() {
+      const out = document.getElementById('astOutput');
+      out.innerText = "Analyzing AST across repository files...";
+      try {
+        const res = await fetch('/api/ast/');
+        const data = await res.json();
+        out.innerText = JSON.stringify(data, null, 2);
+      } catch(e) {
+        out.innerText = "Error scanning AST: " + e;
+      }
+    }
+
+    function escapeHtml(text) {
+      return (text || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    loadTasks();
+    lucide.createIcons();
+  </script>
+</body>
+</html>
