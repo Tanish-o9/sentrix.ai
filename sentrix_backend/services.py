@@ -38,8 +38,9 @@ def prepare_workspace(repo_url: str) -> tuple[bool, str, str]:
         repo_name = repo_name[:-4]
 
     target_dir = BASE_WORKSPACE / repo_name
-    if target_dir.exists():
-        return True, str(target_dir), f"Workspace existing at {target_dir.name}"
+    if target_dir.exists() and (target_dir / ".git").exists():
+        subprocess.run(["git", "-C", str(target_dir), "pull"], capture_output=True, text=True, timeout=30)
+        return True, str(target_dir), f"Workspace updated to latest commit at {target_dir.name}"
 
     # Clone repository
     try:
