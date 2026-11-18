@@ -6,12 +6,15 @@ sandbox testing, GitHub PR creation, and the visual Human Approval dashboard.
 
 import json
 import os
+from pathlib import Path
 from django.http import JsonResponse, HttpRequest
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from sentrix_agno.workflow import run_aether_pipeline as run_sentrix_pipeline
 from .models import Project, Task, TaskStep, CodePatch, Approval
-from .services import calculate_patch_hash, scan_repo_ast, run_sandbox_tests, create_github_draft_pr, prepare_workspace
+from .services import calculate_patch_hash, scan_repo_ast, run_sandbox_tests, deploy_approved_patch, prepare_workspace
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def dashboard_view(request: HttpRequest):
@@ -28,17 +31,37 @@ def ast_view(request: HttpRequest):
 
 @csrf_exempt
 def set_api_key(request: HttpRequest):
-    """Saves LLM API key in current environment for Agno agents."""
+    """Saves LLM API key in environment and persists to .env."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
     data = json.loads(request.body)
-    provider = data.get("provider", "openai").upper()
+    provider = data.get("provider", "gemini").lower()
     api_key = data.get("api_key", "").strip()
-    if api_key:
-        os.environ[f"{provider}_API_KEY"] = api_key
-        os.environ["LLM_PROVIDER"] = provider.lower()
-        return JsonResponse({"status": "ok", "message": f"{provider} API key configured successfully!"})
-    return JsonResponse({"error": "API key cannot be empty"}, status=400)
+    if not api_key:
+        return JsonResponse({"error": "API key cannot be empty"}, status=400)
+
+    key_var = f"{provider.upper()}_API_KEY"
+    os.environ[key_var] = api_key
+    os.environ["LLM_PROVIDER"] = provider
+
+    env_path = BASE_DIR / ".env"
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    filtered = [l for l in lines if not l.startswith(f"{key_var}=") and not l.startswith("LLM_PROVIDER=")]
+    filtered.extend([f"{key_var}={api_key}", f"LLM_PROVIDER={provider}"])
+    env_path.write_text("\n".join(filtered) + "\n", encoding="utf-8")
+
+    return JsonResponse({"status": "ok", "message": f"{provider.capitalize()} API key saved and activated!"})
+
+
+def get_api_status(request: HttpRequest):
+    """Returns active LLM provider status."""
+    active_prov = (os.getenv("LLM_PROVIDER") or "").lower()
+    has_gemini = bool(os.getenv("GEMINI_API_KEY"))
+    has_openai = bool(os.getenv("OPENAI_API_KEY"))
+    has_groq = bool(os.getenv("GROQ_API_KEY")) and active_prov == "groq"
+    has_key = has_gemini or has_openai or has_groq
+    provider_name = active_prov.capitalize() if has_key else "Offline"
+    return JsonResponse({"has_key": has_key, "provider": provider_name})
 
 
 @csrf_exempt
@@ -97,7 +120,7 @@ def run_task(request: HttpRequest, task_id: int):
     task.status = Task.Status.PLANNING
     task.save()
 
-    # 1. Prepare Workspace (Clone if remote GitHub repo)
+    # 1. Prepare Workspace (Clone/Pull if remote GitHub repo)
     repo_url = task.project.repo_url
     ok, workspace_path, status_msg = prepare_workspace(repo_url)
 
@@ -121,6 +144,7 @@ def run_task(request: HttpRequest, task_id: int):
         test_runner_fn=lambda diff: run_sandbox_tests(workspace_path),
         api_key=api_key,
         provider=provider,
+        workspace_path=workspace_path,
     )
 
     # 5. Save Plan and Task Steps in Django DB
@@ -133,25 +157,35 @@ def run_task(request: HttpRequest, task_id: int):
     TaskStep.objects.create(task=task, agent_name="Agno Reviewer", step_type="AUDIT", output_summary=str(agent_output["review"]))
 
     # 6. Save Patch with Cryptographic SHA256 Hash
-    diff_text = agent_output["patch"]["diff"]
-    patch_hash = calculate_patch_hash(diff_text)
-    CodePatch.objects.update_or_create(
-        task=task,
-        defaults={"patch_hash": patch_hash, "diff": diff_text, "explanation": agent_output["patch"]["explanation"]},
-    )
-
-    # 7. Await Human Approval
-    task.status = Task.Status.AWAITING_APPROVAL
+    diff_text = agent_output["patch"].get("diff", "")
+    if diff_text and ("--- " in diff_text or "diff --git" in diff_text):
+        patch_hash = calculate_patch_hash(diff_text)
+        CodePatch.objects.update_or_create(
+            task=task,
+            defaults={"patch_hash": patch_hash, "diff": diff_text, "explanation": agent_output["patch"]["explanation"]},
+        )
+        task.status = Task.Status.AWAITING_APPROVAL
+    else:
+        patch_hash = ""
+        CodePatch.objects.update_or_create(
+            task=task,
+            defaults={"patch_hash": "", "diff": "", "explanation": agent_output["patch"]["explanation"]},
+        )
+        task.status = Task.Status.APPROVED
     task.save()
 
     return JsonResponse({
         "task_id": task.id,
         "status": task.status,
         "plan": task.plan,
+        "patch": agent_output["patch"],
         "patch_hash": patch_hash,
         "review": agent_output["review"],
         "qa_retries": agent_output.get("qa_retries", 0),
         "workspace_msg": status_msg,
+        "is_info": agent_output.get("is_info", False),
+        "llm_error": agent_output.get("llm_error"),
+        "model_used": agent_output.get("model_used", "none"),
     })
 
 
@@ -194,20 +228,22 @@ def approve_task(request: HttpRequest, task_id: int):
     except Task.DoesNotExist:
         return JsonResponse({"error": "Task not found"}, status=404)
 
-    if not hasattr(task, "patch") or task.patch.patch_hash != submitted_hash:
+    if hasattr(task, "patch") and task.patch.diff and task.patch.patch_hash != submitted_hash:
         return JsonResponse({"error": "Patch hash mismatch. Approval rejected."}, status=400)
 
-    Approval.objects.create(task=task, patch_hash=submitted_hash, approver=data.get("approver", "human_reviewer"), decision=decision)
+    Approval.objects.create(task=task, patch_hash=submitted_hash or "", approver=data.get("approver", "human_reviewer"), decision=decision)
 
     if decision == "APPROVED":
         task.status = Task.Status.APPROVED
-        pr_info = create_github_draft_pr(
+        ok, workspace_path, _ = prepare_workspace(task.project.repo_url)
+        deploy_info = deploy_approved_patch(
+            workspace_path=workspace_path,
             repo_url=task.project.repo_url,
-            branch_name=f"sentrix/task-{task.id}",
-            title=f"SENTRIX: {task.prompt[:50]}",
-            body=f"Automated draft PR generated by SENTRIX.ai Agno agents for Task #{task.id}.\n\nApproved Patch Hash: `{submitted_hash}`",
+            task_id=task.id,
+            prompt=task.prompt,
+            diff_text=task.patch.diff if hasattr(task, "patch") else "",
         )
-        task.pr_url = pr_info.get("html_url", "")
+        task.pr_url = deploy_info.get("html_url", "")
     else:
         task.status = Task.Status.REJECTED
 

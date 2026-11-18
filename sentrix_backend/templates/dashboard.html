@@ -357,6 +357,23 @@
 
     async function refreshData() {
       await loadTasks();
+      await checkApiStatus();
+    }
+
+    async function checkApiStatus() {
+      try {
+        const res = await fetch('/api/settings/api-status/');
+        const data = await res.json();
+        const badge = document.getElementById('activeLlmBadge');
+        if (data.has_key) {
+          badge.className = "text-xs font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 cursor-pointer";
+          badge.innerText = `● ${data.provider} AI Active`;
+        } else {
+          badge.className = "text-xs font-medium px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-pointer";
+          badge.innerText = `● Offline Synthesizer`;
+        }
+        badge.onclick = openSettingsModal;
+      } catch(e) {}
     }
 
     async function loadTasks() {
@@ -395,13 +412,18 @@
               <p class="text-[10px] text-slate-500">Created: ${new Date(t.created_at).toLocaleString()}</p>
             </div>
             <div class="flex items-center gap-2 self-end sm:self-center">
+              ${t.pr_url ? `
+                <a href="${t.pr_url}" target="_blank" class="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 rounded-lg text-xs font-semibold border border-emerald-500/30 flex items-center gap-1.5">
+                  <i data-lucide="git-pull-request" class="w-3.5 h-3.5"></i> View PR
+                </a>
+              ` : ''}
               ${t.status === 'CREATED' ? `
                 <button onclick="runAgents(${t.id})" class="px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/20">
                   <i data-lucide="play" class="w-3.5 h-3.5"></i> Run Agno Agents
                 </button>
               ` : `
                 <button onclick="viewTask(${t.id})" class="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 flex items-center gap-1.5">
-                  <i data-lucide="eye" class="w-3.5 h-3.5"></i> Inspect Diff & Gate
+                  <i data-lucide="eye" class="w-3.5 h-3.5"></i> ${t.status === 'APPROVED' ? 'Inspect Details' : 'Inspect Diff & Gate'}
                 </button>
               `}
             </div>
@@ -422,7 +444,7 @@
         body: JSON.stringify({repo_url, prompt})
       });
       document.getElementById('promptInput').value = '';
-      loadTasks();
+      await loadTasks();
     };
 
     async function runAgents(id) {
@@ -433,11 +455,11 @@
       try {
         const res = await fetch(`/api/tasks/${id}/run/`, {method: 'POST'});
         const data = await res.json();
-        loadTasks();
+        await loadTasks();
         viewTask(id);
       } catch(e) {
         alert("Error running agents: " + e);
-        loadTasks();
+        await loadTasks();
       }
     }
 
@@ -446,7 +468,7 @@
       const res = await fetch(`/api/tasks/${id}/`);
       const data = await res.json();
 
-      document.getElementById('modalTitle').innerText = `Task #${data.id} Patch Review`;
+      document.getElementById('modalTitle').innerText = `Task #${data.id} ${data.patch && data.patch.diff ? 'Patch Review' : 'Repository Inspection'}`;
       document.getElementById('modalRepo').innerText = `Target Repo: ${data.repo_url || 'Local Workspace'}`;
       document.getElementById('modalPrompt').innerText = `Prompt: "${data.prompt}"`;
       
@@ -462,8 +484,10 @@
         critUl.innerHTML = `<li>No plan generated yet.</li>`;
       }
 
-      // Populate Diff
-      if (data.patch) {
+      // Populate Diff or Inspection Output
+      const approveBtn = document.getElementById('approveBtn');
+      const rejectBtn = document.getElementById('rejectBtn');
+      if (data.patch && data.patch.diff) {
         activePatchHash = data.patch.patch_hash;
         document.getElementById('modalHash').innerText = activePatchHash;
         
@@ -471,16 +495,24 @@
         const formatted = lines.map(line => {
           if (line.startsWith('+')) return `<div class="diff-line-add px-2 py-0.5">${escapeHtml(line)}</div>`;
           if (line.startsWith('-')) return `<div class="diff-line-del px-2 py-0.5">${escapeHtml(line)}</div>`;
-          if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) return `<div class="diff-line-hdr px-2 py-0.5">${escapeHtml(line)}</div>`;
+          if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++') || line.startsWith('diff')) return `<div class="diff-line-hdr px-2 py-0.5">${escapeHtml(line)}</div>`;
           return `<div class="text-slate-400 px-2 py-0.5">${escapeHtml(line)}</div>`;
         }).join('');
         document.getElementById('modalDiffFormatted').innerHTML = formatted;
+        approveBtn.style.display = 'inline-flex';
+        rejectBtn.style.display = 'inline-flex';
+      } else {
+        activePatchHash = "";
+        document.getElementById('modalHash').innerText = "EXPLORATION / QUERY COMPLETED (READ-ONLY)";
+        const explanation = (data.patch && data.patch.explanation) ? data.patch.explanation : "Repository inspection completed.";
+        document.getElementById('modalDiffFormatted').innerHTML = `<div class="p-4 bg-slate-900 rounded-xl font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">${escapeHtml(explanation)}</div>`;
+        approveBtn.style.display = 'none';
+        rejectBtn.style.display = 'none';
       }
 
       // Show PR link if present
       const prBox = document.getElementById('modalPrContainer');
       const prLink = document.getElementById('modalPrLink');
-      const approveBtn = document.getElementById('approveBtn');
       if (data.pr_url) {
         prBox.classList.remove('hidden');
         prLink.href = data.pr_url;
@@ -492,6 +524,10 @@
         approveBtn.disabled = false;
         approveBtn.classList.remove('opacity-50');
       }
+
+      document.getElementById('diffModal').classList.remove('hidden');
+      lucide.createIcons();
+    }
 
       document.getElementById('diffModal').classList.remove('hidden');
       lucide.createIcons();
