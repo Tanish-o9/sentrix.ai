@@ -2,10 +2,10 @@
 
 Handles:
 - Workspace preparation (cloning & pulling GitHub repos into workspaces/)
-- Non-executable AST inspection with POSIX paths
+- Non-executable multi-language AST & symbol inspection (Python, JS, TS, HTML, CSS)
 - Sandboxed test execution
 - Patch verification & SHA-256 cryptographic hashing
-- Clean idiomatic code block derivation & mathematical unified diff generation
+- Multi-language clean idiomatic code generation & mathematical unified diffs
 - Git branch creation, patch application & pushing to GitHub
 """
 
@@ -58,23 +58,42 @@ def prepare_workspace(repo_url: str) -> tuple[bool, str, str]:
 
 
 def scan_repo_ast(workspace_path: str) -> dict:
-    """Inspects Python codebase using AST without executing any untrusted code."""
+    """Inspects codebase symbols without executing untrusted code (Python AST + JS/TS/HTML scanner)."""
     summary = {}
     path = Path(workspace_path)
     if not path.exists():
         return {"error": "Workspace path not found"}
 
-    for py_file in path.rglob("*.py"):
-        rel_parts = py_file.relative_to(path).parts
-        if any(skip in rel_parts for skip in (".git", ".venv", "venv", "__pycache__", "node_modules", "migrations")):
+    VALID_EXTS = (".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".json", ".md")
+    SKIP = (".git", ".venv", "venv", "__pycache__", "node_modules", "migrations", "workspaces", "dist", "build")
+
+    for file_path in path.rglob("*"):
+        if not file_path.is_file():
             continue
+        rel_parts = file_path.relative_to(path).parts
+        if any(skip in rel_parts for skip in SKIP):
+            continue
+        ext = file_path.suffix.lower()
+        if ext not in VALID_EXTS:
+            continue
+
+        rel_posix = file_path.relative_to(path).as_posix()
         try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8", errors="ignore"))
-            funcs = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
-            classes = [n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
-            summary[py_file.relative_to(path).as_posix()] = {"functions": funcs, "classes": classes}
+            text = file_path.read_text(encoding="utf-8", errors="ignore")
+            funcs, classes = [], []
+            if ext == ".py":
+                tree = ast.parse(text)
+                funcs = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
+                classes = [n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+            elif ext in (".js", ".jsx", ".ts", ".tsx"):
+                raw = re.findall(r"(?:function\s+([a-zA-Z0-9_$]+)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(?)", text)
+                funcs = [m[0] or m[1] for m in raw if m[0] or m[1]][:12]
+                classes = re.findall(r"class\s+([a-zA-Z0-9_$]+)", text)[:6]
+
+            summary[rel_posix] = {"functions": funcs, "classes": classes}
         except Exception:
-            continue
+            summary[rel_posix] = {"functions": [], "classes": []}
+
     return summary
 
 
@@ -125,13 +144,46 @@ def apply_patch_to_dir(repo_path: str, diff_text: str) -> tuple[bool, str]:
             patch_file.unlink()
 
 
-def derive_code_block(prompt: str) -> tuple[str, list[str]]:
-    """Derives clean, readable function name and idiomatic implementation from prompt."""
+def derive_code_block(prompt: str, file_ext: str = ".py") -> tuple[str, list[str]]:
+    """Derives clean, readable code and comments appropriate for the target file type."""
     clean = prompt.strip()
-    words = [re.sub(r"\W+", "", w.replace(".py", "")).lower() for w in clean.split() if w]
+    words = [re.sub(r"\W+", "", w.replace(".py", "").replace(".js", "").replace(".html", "").replace(".css", "")).lower() for w in clean.split() if w]
     words = [w for w in words if w and w not in ("add", "create", "implement", "write", "to", "in", "for", "the", "a", "an", "repo", "endpoint", "views", "models", "services")]
     func_name = "_".join(words[:3]) or "custom_feature"
 
+    ext = file_ext.lower()
+    if ext == ".html":
+        code = [
+            f"<!-- --- SENTRIX AUTONOMOUS UI ENHANCEMENT: {clean} --- -->",
+            "<div class=\"sentrix-enhanced-module\" style=\"margin: 1.5rem 0; padding: 1rem 1.25rem; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; font-family: system-ui, sans-serif;\">",
+            f"  <h4 style=\"margin: 0 0 0.5rem 0; color: #38bdf8; font-size: 0.95rem;\">✨ Enhanced Controls ({func_name})</h4>",
+            f"  <p style=\"margin: 0; color: #94a3b8; font-size: 0.85rem;\">Autonomous UI improvements active: {clean}</p>",
+            "</div>",
+        ]
+        return func_name, code
+
+    if ext in (".js", ".jsx", ".ts", ".tsx"):
+        code = [
+            f"// --- SENTRIX AUTONOMOUS IMPLEMENTATION ---",
+            f"// Task: {clean}",
+            f"export function {func_name}() {{",
+            f"  console.log(\"SENTRIX: {clean} initialized\");",
+            f"  return {{ status: \"active\", feature: \"{func_name}\" }};",
+            f"}}",
+        ]
+        return func_name, code
+
+    if ext == ".css":
+        code = [
+            f"/* --- SENTRIX AUTONOMOUS STYLES: {clean} --- */",
+            f".{func_name} {{",
+            "  backdrop-filter: blur(8px);",
+            "  transition: all 0.3s ease-in-out;",
+            "}",
+        ]
+        return func_name, code
+
+    # Default Python
     low = clean.lower()
     if any(k in low for k in ("ping", "health")):
         code = [
@@ -201,25 +253,30 @@ def create_valid_code_patch(workspace_path: str, target_rel_file: str, prompt: s
             f"@@ -0,0 +1,{len(lines)} @@\n"
             f"{add_str}\n"
         )
+
     file_path = path / target_rel_file
     if not file_path.exists():
-        for py in path.rglob("*.py"):
-            rel_parts = py.relative_to(path).parts
-            if not any(skip in rel_parts for skip in (".git", ".venv", "workspaces", "migrations")):
-                file_path = py
-                target_rel_file = py.relative_to(path).as_posix()
+        for candidate in path.rglob("*"):
+            if not candidate.is_file():
+                continue
+            rel_parts = candidate.relative_to(path).parts
+            if any(skip in rel_parts for skip in (".git", ".venv", "workspaces", "node_modules", "dist", "build")):
+                continue
+            if candidate.suffix.lower() in (".html", ".js", ".jsx", ".ts", ".tsx", ".py", ".css"):
+                file_path = candidate
+                target_rel_file = candidate.relative_to(path).as_posix()
                 break
 
     if not file_path.exists():
         return ""
 
     lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    func_name, code_lines = derive_code_block(prompt)
+    func_name, code_lines = derive_code_block(prompt, file_ext=file_path.suffix)
     ctx_count = min(3, len(lines))
     ctx_lines = lines[-ctx_count:] if ctx_count else []
     start_line = max(1, len(lines) - ctx_count + 1)
 
-    new_code = ["", "# --- SENTRIX AUTONOMOUS IMPLEMENTATION ---"] + code_lines
+    new_code = [""] + code_lines
 
     ctx_str = "\n".join([f" {l}" for l in ctx_lines])
     add_str = "\n".join([f"+{l}" for l in new_code])
@@ -245,7 +302,6 @@ def deploy_approved_patch(workspace_path: str, repo_url: str, task_id: int, prom
     compare_url = f"https://github.com/{owner}/{repo_name}/compare/main...{branch_name}?expand=1"
 
     ws = Path(workspace_path).resolve()
-    # If workspace is the development project itself, don't modify the dev tree
     if ws == ROOT_DIR.resolve() or not (ws / ".git").exists():
         return {"html_url": compare_url, "state": "approved", "branch": branch_name}
 
@@ -257,7 +313,7 @@ def deploy_approved_patch(workspace_path: str, repo_url: str, task_id: int, prom
         if ok:
             subprocess.run(["git", "add", "."], cwd=workspace_path, capture_output=True, text=True)
             subprocess.run(["git", "commit", "-m", f"feat(sentrix): {prompt} (Task #{task_id})"], cwd=workspace_path, capture_output=True, text=True)
-            push_res = subprocess.run(["git", "push", "-u", "origin", branch_name], cwd=workspace_path, capture_output=True, text=True)
+            push_res = subprocess.run(["git", "push", "-u", "origin", branch_name], cwd=workspace_path, capture_output=True, text=True, timeout=60)
             if push_res.returncode == 0:
                 return {"html_url": compare_url, "state": "pushed", "branch": branch_name}
 

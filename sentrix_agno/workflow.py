@@ -111,12 +111,25 @@ def get_target_file(files: list[str], prompt: str) -> str:
         return "README.md"
     if not files:
         return "sentrix_backend/views.py"
-    prompt_words = prompt.lower().split()
+
+    # Match UI / Dashboard / Frontend keywords
+    if any(k in low for k in ("dashboard", "deshboard", "ui", "home", "front", "web", "page", "music")):
+        ui_match = next((f for f in files if any(n in f.lower() for n in ("index.html", "dashboard.html", "app.jsx", "app.js", "script.js", "style.css"))), None)
+        if ui_match:
+            return ui_match
+
+    # Match Server / API / Backend keywords
+    if any(k in low for k in ("server", "api", "backend", "route", "controller", "auth")):
+        srv_match = next((f for f in files if any(n in f.lower() for n in ("server.js", "app.js", "routes", "views.py", "main.py"))), None)
+        if srv_match:
+            return srv_match
+
+    prompt_words = low.split()
     for f in files:
         stem = Path(f).stem.lower()
         if stem in prompt_words:
             return f
-    for pref in ("view", "service", "model", "route", "util", "main"):
+    for pref in ("index.html", "server.js", "app.js", "views.py", "main.py", "view", "service", "model"):
         match = next((f for f in files if pref in f.lower()), None)
         if match:
             return match
@@ -146,7 +159,8 @@ def run_aether_pipeline(
 
     # 2. Informational / Exploration Queries (No code diff generated)
     prompt_lower = task_prompt.lower()
-    is_info = any(w in prompt_lower for w in ("show", "list", "files", "structure", "tree", "explore", "what are", "display"))
+    is_action = any(w in prompt_lower for w in ("improve", "add", "fix", "update", "create", "patch", "modify", "implement", "build"))
+    is_info = (not is_action) and any(w in prompt_lower for w in ("show", "list", "files", "structure", "tree", "explore", "what are", "display"))
 
     if is_info or not files:
         file_lines = "\n".join([f"  • {f}" for f in files]) if files else "  (No files found in workspace)"
