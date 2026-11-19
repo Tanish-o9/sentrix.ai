@@ -32,10 +32,23 @@ TEMPLATES = [
     },
 ]
 
+# Database configuration (handles Vercel read-only serverless filesystem)
+if "VERCEL" in os.environ:
+    import shutil
+    db_dest = Path("/tmp/db.sqlite3")
+    if not db_dest.exists() and (BASE_DIR / "db.sqlite3").exists():
+        try:
+            shutil.copy2(BASE_DIR / "db.sqlite3", db_dest)
+        except Exception:
+            pass
+    DB_PATH = db_dest
+else:
+    DB_PATH = BASE_DIR / "db.sqlite3"
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": DB_PATH,
     }
 }
 
