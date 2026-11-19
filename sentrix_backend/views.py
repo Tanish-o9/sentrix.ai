@@ -32,37 +32,43 @@ def ast_view(request: HttpRequest):
 
 @csrf_exempt
 def set_api_key(request: HttpRequest):
-    """Saves LLM API key in environment and persists to .env."""
+    """Saves LLM API key & GitHub Token in environment and persists to .env."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
     data = json.loads(request.body)
     provider = data.get("provider", "gemini").lower()
     api_key = data.get("api_key", "").strip()
-    if not api_key:
-        return JsonResponse({"error": "API key cannot be empty"}, status=400)
-
-    key_var = f"{provider.upper()}_API_KEY"
-    os.environ[key_var] = api_key
-    os.environ["LLM_PROVIDER"] = provider
+    github_token = data.get("github_token", "").strip()
 
     env_path = BASE_DIR / ".env"
     lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-    filtered = [l for l in lines if not l.startswith(f"{key_var}=") and not l.startswith("LLM_PROVIDER=")]
-    filtered.extend([f"{key_var}={api_key}", f"LLM_PROVIDER={provider}"])
-    env_path.write_text("\n".join(filtered) + "\n", encoding="utf-8")
 
-    return JsonResponse({"status": "ok", "message": f"{provider.capitalize()} API key saved and activated!"})
+    if api_key:
+        key_var = f"{provider.upper()}_API_KEY"
+        os.environ[key_var] = api_key
+        os.environ["LLM_PROVIDER"] = provider
+        lines = [l for l in lines if not l.startswith(f"{key_var}=") and not l.startswith("LLM_PROVIDER=")]
+        lines.extend([f"{key_var}={api_key}", f"LLM_PROVIDER={provider}"])
+
+    if github_token:
+        os.environ["GITHUB_TOKEN"] = github_token
+        lines = [l for l in lines if not l.startswith("GITHUB_TOKEN=")]
+        lines.append(f"GITHUB_TOKEN={github_token}")
+
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return JsonResponse({"status": "ok", "message": "Settings updated and saved successfully!"})
 
 
 def get_api_status(request: HttpRequest):
-    """Returns active LLM provider status."""
+    """Returns active LLM provider and GitHub token status."""
     active_prov = (os.getenv("LLM_PROVIDER") or "").lower()
     has_gemini = bool(os.getenv("GEMINI_API_KEY"))
     has_openai = bool(os.getenv("OPENAI_API_KEY"))
     has_groq = bool(os.getenv("GROQ_API_KEY")) and active_prov == "groq"
     has_key = has_gemini or has_openai or has_groq
+    has_github = bool(os.getenv("GITHUB_TOKEN"))
     provider_name = active_prov.capitalize() if has_key else "Offline"
-    return JsonResponse({"has_key": has_key, "provider": provider_name})
+    return JsonResponse({"has_key": has_key, "provider": provider_name, "has_github": has_github})
 
 
 @csrf_exempt
@@ -204,6 +210,12 @@ def task_detail(request: HttpRequest, task_id: int):
     if hasattr(task, "patch"):
         patch_data = {"patch_hash": task.patch.patch_hash, "diff": task.patch.diff, "explanation": task.patch.explanation}
 
+    clean_url = (task.project.repo_url or "").strip().rstrip("/")
+    parts = clean_url.split("github.com/")[-1].split("/")
+    owner, repo_name = (parts[0], parts[1].replace(".git", "")) if len(parts) >= 2 else ("owner", "repo")
+    fork_url = f"https://github.com/{owner}/{repo_name}/fork" if "github.com" in clean_url else ""
+    branch_name = f"sentrix/task-{task.id}"
+
     steps = list(task.steps.values("agent_name", "step_type", "output_summary", "created_at"))
     return JsonResponse({
         "id": task.id,
@@ -214,6 +226,8 @@ def task_detail(request: HttpRequest, task_id: int):
         "pr_url": task.pr_url,
         "patch": patch_data,
         "steps": steps,
+        "fork_url": fork_url,
+        "branch": branch_name,
     })
 
 
@@ -273,19 +287,25 @@ def approve_task(request: HttpRequest, task_id: int):
 
     notice = ""
     is_external = False
+    fork_url = ""
+    branch_name = f"sentrix/task-{task.id}"
     if decision == "APPROVED":
         task.status = Task.Status.APPROVED
         ok, workspace_path, _ = prepare_workspace(task.project.repo_url)
+        github_token = os.getenv("GITHUB_TOKEN", "")
         deploy_info = deploy_approved_patch(
             workspace_path=workspace_path,
             repo_url=task.project.repo_url,
             task_id=task.id,
             prompt=task.prompt,
             diff_text=task.patch.diff if hasattr(task, "patch") else "",
+            github_token=github_token,
         )
         task.pr_url = deploy_info.get("html_url", "")
         notice = deploy_info.get("notice", "")
         is_external = deploy_info.get("is_external", False)
+        fork_url = deploy_info.get("fork_url", "")
+        branch_name = deploy_info.get("branch", branch_name)
     else:
         task.status = Task.Status.REJECTED
 
@@ -298,6 +318,8 @@ def approve_task(request: HttpRequest, task_id: int):
         "pr_url": task.pr_url,
         "notice": notice,
         "is_external": is_external,
+        "fork_url": fork_url,
+        "branch": branch_name,
     })
 
 

@@ -327,20 +327,59 @@ def create_valid_code_patch(workspace_path: str, target_rel_file: str, prompt: s
     return primary_diff
 
 
-def deploy_approved_patch(workspace_path: str, repo_url: str, task_id: int, prompt: str, diff_text: str) -> dict:
-    """Creates a task branch, applies patch, commits, and handles both own and external 403 repos."""
+def fork_and_pr_external_repo(workspace_path: str, owner: str, repo: str, branch_name: str, base_branch: str, prompt: str, task_id: int, token: str) -> dict:
+    """Forks an external repository via GitHub REST API, pushes branch, and opens a cross-repo Pull Request."""
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "User-Agent": "SENTRIX-AI"}
+    try:
+        req = urllib.request.Request("https://api.github.com/user", headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            my_user = json.loads(r.read().decode()).get("login")
+        if not my_user:
+            return {}
+
+        fork_req = urllib.request.Request(f"https://api.github.com/repos/{owner}/{repo}/forks", data=b"{}", headers=headers)
+        try:
+            with urllib.request.urlopen(fork_req, timeout=15):
+                pass
+        except Exception:
+            pass
+
+        fork_push_url = f"https://x-access-token:{token}@github.com/{my_user}/{repo}.git"
+        subprocess.run(["git", "remote", "remove", "sentrix_fork"], cwd=workspace_path, capture_output=True)
+        subprocess.run(["git", "remote", "add", "sentrix_fork", fork_push_url], cwd=workspace_path, capture_output=True)
+        push_fork = subprocess.run(["git", "push", "-u", "sentrix_fork", branch_name], cwd=workspace_path, capture_output=True, text=True, timeout=60)
+
+        if push_fork.returncode == 0:
+            pr_data = json.dumps({
+                "title": f"feat(sentrix): {prompt} (Task #{task_id})",
+                "head": f"{my_user}:{branch_name}",
+                "base": base_branch,
+                "body": f"Automated patch generated and approved via SENTRIX.ai.\n\n**Task:** {prompt}",
+            }).encode("utf-8")
+            pr_req = urllib.request.Request(f"https://api.github.com/repos/{owner}/{repo}/pulls", data=pr_data, headers=headers)
+            with urllib.request.urlopen(pr_req, timeout=15) as pr_res:
+                created_pr = json.loads(pr_res.read().decode())
+                return {"html_url": created_pr.get("html_url", ""), "state": "pr_created", "branch": branch_name, "is_external": True, "fork_url": f"https://github.com/{my_user}/{repo}"}
+    except Exception:
+        pass
+    return {}
+
+
+def deploy_approved_patch(workspace_path: str, repo_url: str, task_id: int, prompt: str, diff_text: str, github_token: str = "") -> dict:
+    """Creates a task branch, applies patch, commits, and handles both own and external repos."""
     branch_name = f"sentrix/task-{task_id}"
 
     clean_url = (repo_url or "").strip().rstrip("/")
     parts = clean_url.split("github.com/")[-1].split("/")
     owner, repo_name = (parts[0], parts[1].replace(".git", "")) if len(parts) >= 2 else ("owner", "repo")
+    fork_url = f"https://github.com/{owner}/{repo_name}/fork"
 
     ws = Path(workspace_path).resolve()
     base_branch = get_default_branch(str(ws)) if (ws / ".git").exists() else "main"
     compare_url = f"https://github.com/{owner}/{repo_name}/compare/{base_branch}...{branch_name}?expand=1"
 
     if ws == ROOT_DIR.resolve() or not (ws / ".git").exists():
-        return {"html_url": compare_url, "state": "approved", "branch": branch_name, "is_external": False}
+        return {"html_url": compare_url, "state": "approved", "branch": branch_name, "is_external": False, "fork_url": fork_url}
 
     subprocess.run(["git", "checkout", base_branch], cwd=str(ws), capture_output=True, text=True)
     subprocess.run(["git", "checkout", "-B", branch_name], cwd=str(ws), capture_output=True, text=True)
@@ -350,13 +389,31 @@ def deploy_approved_patch(workspace_path: str, repo_url: str, task_id: int, prom
         if ok:
             subprocess.run(["git", "add", "."], cwd=str(ws), capture_output=True, text=True)
             subprocess.run(["git", "commit", "-m", f"feat(sentrix): {prompt} (Task #{task_id})"], cwd=str(ws), capture_output=True, text=True)
-            
-            # Attempt remote push
-            push_res = subprocess.run(["git", "push", "-u", "origin", branch_name], cwd=str(ws), capture_output=True, text=True, timeout=60)
+
+            token = github_token or os.getenv("GITHUB_TOKEN") or ""
+
+            # 1. Attempt direct push (works if repo is owned or collaborator)
+            push_cmd = ["git", "push", "-u", "origin", branch_name]
+            if token:
+                auth_url = f"https://x-access-token:{token}@github.com/{owner}/{repo_name}.git"
+                push_cmd = ["git", "push", "-u", auth_url, branch_name]
+
+            push_res = subprocess.run(push_cmd, cwd=str(ws), capture_output=True, text=True, timeout=60)
             if push_res.returncode == 0:
-                return {"html_url": compare_url, "state": "pushed", "branch": branch_name, "is_external": False}
-            
-            # If 403 Permission Denied on external/foreign repo:
+                pr_link = compare_url
+                if token:
+                    pr_api = create_github_draft_pr(repo_url, branch_name, f"feat(sentrix): {prompt}", "Generated by SENTRIX.ai", token=token)
+                    if pr_api.get("html_url"):
+                        pr_link = pr_api["html_url"]
+                return {"html_url": pr_link, "state": "pushed", "branch": branch_name, "is_external": False, "fork_url": fork_url}
+
+            # 2. If 403 on external repo, attempt automated fork & PR via token
+            if token:
+                fork_info = fork_and_pr_external_repo(str(ws), owner, repo_name, branch_name, base_branch, prompt, task_id, token)
+                if fork_info.get("html_url"):
+                    return fork_info
+
+            # 3. Fallback for external repo: committed locally on task branch with patch file
             patch_file = ws / f"sentrix_task_{task_id}.patch"
             patch_file.write_text(diff_text, encoding="utf-8")
             return {
@@ -364,13 +421,26 @@ def deploy_approved_patch(workspace_path: str, repo_url: str, task_id: int, prom
                 "state": "local_applied",
                 "branch": branch_name,
                 "is_external": True,
+                "fork_url": fork_url,
                 "patch_file": str(patch_file),
-                "notice": f"External Repo: Patch committed locally on branch '{branch_name}'. Direct push to {owner}'s repo is restricted by GitHub (403 Permission Denied). You can download the .patch file directly from SENTRIX.",
+                "notice": f"External Repo: Changes committed on branch '{branch_name}'. You can download the .patch file directly or fork the repository on GitHub.",
             }
 
-    return {"html_url": compare_url, "state": "approved", "branch": branch_name, "is_external": False}
+    return {"html_url": compare_url, "state": "approved", "branch": branch_name, "is_external": False, "fork_url": fork_url}
 
 
 def create_github_draft_pr(repo_url: str, branch_name: str, title: str, body: str, token: str = "") -> dict:
-    """Draft PR helper for backwards compatibility."""
-    return deploy_approved_patch(".", repo_url, 1, title, "")
+    """Creates a draft pull request via GitHub REST API if token is provided."""
+    clean_url = (repo_url or "").strip().rstrip("/")
+    parts = clean_url.split("github.com/")[-1].split("/")
+    if len(parts) < 2 or not token:
+        return {"html_url": ""}
+    owner, repo = parts[0], parts[1].replace(".git", "")
+    try:
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "User-Agent": "SENTRIX-AI"}
+        pr_data = json.dumps({"title": title, "head": branch_name, "base": "main", "body": body}).encode("utf-8")
+        req = urllib.request.Request(f"https://api.github.com/repos/{owner}/{repo}/pulls", data=pr_data, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as res:
+            return json.loads(res.read().decode())
+    except Exception:
+        return {"html_url": f"https://github.com/{owner}/{repo}/compare/main...{branch_name}?expand=1"}
