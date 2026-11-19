@@ -1,0 +1,14 @@
+[project]
+name = "sentrix-ai"
+version = "1.0.0"
+description = "Autonomous AI Software Engineering Platform"
+requires-python = ">=3.11"
+dependencies = [
+    "django>=5.0,<7.0",
+    "agno>=1.0",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+]
+
+[tool.vercel]
+entrypoint = "sentrix_backend.wsgi:application"

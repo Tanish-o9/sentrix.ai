@@ -23,6 +23,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "sentrix_backend.urls_root"
+WSGI_APPLICATION = "sentrix_backend.wsgi.application"
 
 TEMPLATES = [
     {
@@ -42,7 +43,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 TIME_ZONE = "UTC"
 USE_TZ = True
 
+# Static Files
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
 # Security & Header Protections
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
-CSRF_TRUSTED_ORIGINS = ["http://127.0.0.1:8000", "http://localhost:8000"]
+CSRF_TRUSTED_ORIGINS = ["http://127.0.0.1:8000", "http://localhost:8000", "https://*.vercel.app"]
