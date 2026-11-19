@@ -24,6 +24,7 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "sentrix_backend.urls_root"
 WSGI_APPLICATION = "sentrix_backend.wsgi.application"
+ASGI_APPLICATION = "sentrix_backend.asgi.application"
 
 TEMPLATES = [
     {
