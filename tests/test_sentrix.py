@@ -70,3 +70,29 @@ class SentrixFullFeaturesTests(TestCase):
         self.assertEqual(data["patch_hash"], "")
         self.assertEqual(data["status"], "APPROVED")
         self.assertIn("Repository exploration complete", data["patch"]["explanation"])
+
+    def test_inline_patch_editing_and_rehash(self):
+        res = self.client.post(
+            "/api/tasks/",
+            data=json.dumps({"project_id": self.project.id, "prompt": "Add health endpoint"}),
+            content_type="application/json",
+        )
+        task_id = res.json()["id"]
+        self.client.post(f"/api/tasks/{task_id}/run/")
+
+        # Edit the diff inline
+        new_diff = "diff --git a/test.py b/test.py\n--- a/test.py\n+++ b/test.py\n@@ -1,1 +1,2 @@\n# old\n+# new feature\n"
+        up_res = self.client.post(
+            f"/api/tasks/{task_id}/update-diff/",
+            data=json.dumps({"diff": new_diff}),
+            content_type="application/json",
+        )
+        self.assertEqual(up_res.status_code, 200)
+        self.assertEqual(up_res.json()["status"], "ok")
+        self.assertTrue(len(up_res.json()["patch_hash"]) > 0)
+
+        # Download patch file
+        dl_res = self.client.get(f"/api/tasks/{task_id}/download-patch/")
+        self.assertEqual(dl_res.status_code, 200)
+        self.assertEqual(dl_res["Content-Type"], "text/x-diff")
+        self.assertIn(b"# new feature", dl_res.content)
