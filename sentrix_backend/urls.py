@@ -14,4 +14,7 @@ urlpatterns = [
     path("tasks/<int:task_id>/update-diff/", views.update_patch_diff, name="update-patch-diff"),
     path("tasks/<int:task_id>/download-patch/", views.download_patch, name="download-patch"),
     path("webhooks/github/", views.github_webhook, name="github-webhook"),
+    path("repo/tree/", views.repo_tree_view, name="repo-tree"),
+    path("repo/file/", views.repo_file_view, name="repo-file"),
+    path("repo/commit-pr/", views.repo_direct_commit_pr, name="repo-direct-commit-pr"),
 ]

@@ -341,3 +341,107 @@ def github_webhook(request: HttpRequest):
         return JsonResponse({"status": "dispatched", "task_id": task.id, "prompt": prompt, "repo_url": repo_url}, status=201)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
+
+def repo_tree_view(request: HttpRequest):
+    """Returns directory and file hierarchy for any repository workspace."""
+    repo_url = request.GET.get("repo_url", "").strip()
+    ok, workspace_path, msg = prepare_workspace(repo_url)
+    if not ok:
+        return JsonResponse({"error": msg}, status=400)
+
+    path = Path(workspace_path).resolve()
+    SKIP = (".git", ".venv", "venv", "__pycache__", "node_modules", "workspaces", "dist", "build")
+    files_list = []
+
+    for p in sorted(path.rglob("*")):
+        if p.is_file():
+            rel_parts = p.relative_to(path).parts
+            if any(skip in rel_parts for skip in SKIP):
+                continue
+            parent_dir = p.parent.relative_to(path).as_posix()
+            files_list.append({
+                "path": p.relative_to(path).as_posix(),
+                "name": p.name,
+                "dir": "" if parent_dir == "." else parent_dir,
+                "size": p.stat().st_size,
+                "ext": p.suffix.lower(),
+            })
+
+    return JsonResponse({
+        "workspace": str(path),
+        "repo_url": repo_url,
+        "total_files": len(files_list),
+        "files": files_list,
+    })
+
+
+@csrf_exempt
+def repo_file_view(request: HttpRequest):
+    """Reads or updates a specific file within a repository workspace."""
+    if request.method == "GET":
+        repo_url = request.GET.get("repo_url", "").strip()
+        rel_file = request.GET.get("path", "").strip().lstrip("/\\")
+        ok, ws, msg = prepare_workspace(repo_url)
+        target = (Path(ws) / rel_file).resolve()
+        if not str(target).startswith(str(Path(ws).resolve())):
+            return JsonResponse({"error": "Path traversal blocked"}, status=403)
+        if not target.exists() or not target.is_file():
+            return JsonResponse({"error": "File not found"}, status=404)
+        content = target.read_text(encoding="utf-8", errors="ignore")
+        return JsonResponse({"path": rel_file, "content": content, "size": target.stat().st_size})
+
+    if request.method == "POST":
+        data = json.loads(request.body)
+        repo_url = data.get("repo_url", "").strip()
+        rel_file = data.get("path", "").strip().lstrip("/\\")
+        content = data.get("content", "")
+        ok, ws, msg = prepare_workspace(repo_url)
+        target = (Path(ws) / rel_file).resolve()
+        if not str(target).startswith(str(Path(ws).resolve())):
+            return JsonResponse({"error": "Path traversal blocked"}, status=403)
+        target.write_text(content, encoding="utf-8")
+        return JsonResponse({"status": "saved", "path": rel_file, "size": len(content.encode("utf-8"))})
+
+
+@csrf_exempt
+def repo_direct_commit_pr(request: HttpRequest):
+    """Directly commits in-browser file changes to a new branch and opens a GitHub PR / Fork."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    data = json.loads(request.body)
+    repo_url = data.get("repo_url", "").strip()
+    rel_file = data.get("path", "").strip().lstrip("/\\")
+    content = data.get("content", "")
+    commit_msg = data.get("message", f"Update {rel_file} via SENTRIX web editor").strip()
+
+    ok, ws, msg = prepare_workspace(repo_url)
+    ws_path = Path(ws).resolve()
+    target = (ws_path / rel_file).resolve()
+    if not str(target).startswith(str(ws_path)):
+        return JsonResponse({"error": "Path traversal blocked"}, status=403)
+
+    project_name = repo_url.split("/")[-1] if "/" in repo_url else "Workspace"
+    project, _ = Project.objects.get_or_create(repo_url=repo_url, defaults={"name": project_name})
+    task = Task.objects.create(project=project, prompt=commit_msg, status=Task.Status.APPROVED)
+
+    deploy_info = deploy_approved_patch(
+        workspace_path=str(ws_path),
+        repo_url=repo_url,
+        task_id=task.id,
+        prompt=commit_msg,
+        write_files={rel_file: content},
+        github_token=os.getenv("GITHUB_TOKEN", ""),
+    )
+    task.pr_url = deploy_info.get("html_url", "")
+    task.save()
+
+    return JsonResponse({
+        "status": "ok",
+        "task_id": task.id,
+        "branch": deploy_info.get("branch", f"sentrix/task-{task.id}"),
+        "pr_url": deploy_info.get("html_url", ""),
+        "fork_url": deploy_info.get("fork_url", ""),
+        "is_external": deploy_info.get("is_external", False),
+        "notice": deploy_info.get("notice", ""),
+    })

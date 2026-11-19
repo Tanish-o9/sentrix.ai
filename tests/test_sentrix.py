@@ -96,3 +96,32 @@ class SentrixFullFeaturesTests(TestCase):
         self.assertEqual(dl_res.status_code, 200)
         self.assertEqual(dl_res["Content-Type"], "text/x-diff")
         self.assertIn(b"# new feature", dl_res.content)
+
+    def test_repo_tree_and_file_inspector(self):
+        # 1. Test Tree endpoint
+        res = self.client.get("/api/repo/tree/?repo_url=")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["total_files"] > 0)
+        self.assertTrue(len(data["files"]) > 0)
+
+        # 2. Test File read endpoint
+        first_file = data["files"][0]["path"]
+        f_res = self.client.get(f"/api/repo/file/?repo_url=&path={first_file}")
+        self.assertEqual(f_res.status_code, 200)
+        self.assertIn("content", f_res.json())
+
+    def test_repo_direct_commit_and_pr(self):
+        res = self.client.post(
+            "/api/repo/commit-pr/",
+            data=json.dumps({
+                "repo_url": "https://github.com/sentrix-org/test-repo",
+                "path": "sentrix_backend/views.py",
+                "content": "# test edit\n",
+                "message": "test: web commit"
+            }),
+            content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "ok")
+        self.assertTrue("branch" in res.json())
