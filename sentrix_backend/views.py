@@ -39,6 +39,8 @@ def set_api_key(request: HttpRequest):
     provider = data.get("provider", "gemini").lower()
     api_key = data.get("api_key", "").strip()
     github_token = data.get("github_token", "").strip()
+    if not api_key and not github_token:
+        return JsonResponse({"error": "API key or GitHub token required"}, status=400)
 
     env_path = BASE_DIR / ".env"
     lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
@@ -94,7 +96,7 @@ def task_list_create(request: HttpRequest):
             project = Project.objects.get(id=project_id)
         else:
             project_name = repo_url.split("/")[-1] if "/" in repo_url else "Local Workspace"
-            project, _ = Project.objects.get_or_create(repo_url=repo_url, defaults={"name": project_name})
+            project = Project.objects.filter(repo_url=repo_url).first() or Project.objects.create(repo_url=repo_url, name=project_name)
 
         task = Task.objects.create(project=project, prompt=prompt)
         return JsonResponse({"id": task.id, "prompt": task.prompt, "repo_url": project.repo_url, "status": task.status}, status=201)
@@ -280,7 +282,7 @@ def approve_task(request: HttpRequest, task_id: int):
     except Task.DoesNotExist:
         return JsonResponse({"error": "Task not found"}, status=404)
 
-    if hasattr(task, "patch") and task.patch.diff and task.patch.patch_hash != submitted_hash:
+    if decision == "APPROVED" and hasattr(task, "patch") and task.patch.diff and task.patch.patch_hash != submitted_hash:
         return JsonResponse({"error": "Patch hash mismatch. Approval rejected."}, status=400)
 
     Approval.objects.create(task=task, patch_hash=submitted_hash or "", approver=data.get("approver", "human_reviewer"), decision=decision)
@@ -336,7 +338,7 @@ def github_webhook(request: HttpRequest):
 
         prompt = re.sub(r"@sentrix(?:\.ai)?", "", body_text, flags=re.I).strip()
         repo_url = data.get("repository", {}).get("html_url", "https://github.com/Tanish-o9/sentrix.ai")
-        project, _ = Project.objects.get_or_create(repo_url=repo_url, defaults={"name": repo_url.split('/')[-1]})
+        project = Project.objects.filter(repo_url=repo_url).first() or Project.objects.create(repo_url=repo_url, name=repo_url.split('/')[-1])
         task = Task.objects.create(project=project, prompt=prompt)
         return JsonResponse({"status": "dispatched", "task_id": task.id, "prompt": prompt, "repo_url": repo_url}, status=201)
     except Exception as e:
@@ -383,8 +385,9 @@ def repo_file_view(request: HttpRequest):
         repo_url = request.GET.get("repo_url", "").strip()
         rel_file = request.GET.get("path", "").strip().lstrip("/\\")
         ok, ws, msg = prepare_workspace(repo_url)
+        ws_clean = str(Path(ws).resolve()).lower().rstrip("/\\") + os.sep
         target = (Path(ws) / rel_file).resolve()
-        if not str(target).startswith(str(Path(ws).resolve())):
+        if not (str(target).lower() + os.sep).startswith(ws_clean) and str(target).lower() != str(Path(ws).resolve()).lower():
             return JsonResponse({"error": "Path traversal blocked"}, status=403)
         if not target.exists() or not target.is_file():
             return JsonResponse({"error": "File not found"}, status=404)
@@ -397,8 +400,9 @@ def repo_file_view(request: HttpRequest):
         rel_file = data.get("path", "").strip().lstrip("/\\")
         content = data.get("content", "")
         ok, ws, msg = prepare_workspace(repo_url)
+        ws_clean = str(Path(ws).resolve()).lower().rstrip("/\\") + os.sep
         target = (Path(ws) / rel_file).resolve()
-        if not str(target).startswith(str(Path(ws).resolve())):
+        if not (str(target).lower() + os.sep).startswith(ws_clean) and str(target).lower() != str(Path(ws).resolve()).lower():
             return JsonResponse({"error": "Path traversal blocked"}, status=403)
         target.write_text(content, encoding="utf-8")
         return JsonResponse({"status": "saved", "path": rel_file, "size": len(content.encode("utf-8"))})
@@ -417,12 +421,13 @@ def repo_direct_commit_pr(request: HttpRequest):
 
     ok, ws, msg = prepare_workspace(repo_url)
     ws_path = Path(ws).resolve()
+    ws_clean = str(ws_path).lower().rstrip("/\\") + os.sep
     target = (ws_path / rel_file).resolve()
-    if not str(target).startswith(str(ws_path)):
+    if not (str(target).lower() + os.sep).startswith(ws_clean) and str(target).lower() != str(ws_path).lower():
         return JsonResponse({"error": "Path traversal blocked"}, status=403)
 
     project_name = repo_url.split("/")[-1] if "/" in repo_url else "Workspace"
-    project, _ = Project.objects.get_or_create(repo_url=repo_url, defaults={"name": project_name})
+    project = Project.objects.filter(repo_url=repo_url).first() or Project.objects.create(repo_url=repo_url, name=project_name)
     task = Task.objects.create(project=project, prompt=commit_msg, status=Task.Status.APPROVED)
 
     deploy_info = deploy_approved_patch(
