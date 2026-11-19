@@ -20,6 +20,7 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BASE_WORKSPACE = ROOT_DIR / "workspaces"
+GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""}
 
 
 def calculate_patch_hash(diff_text: str) -> str:
@@ -28,15 +29,15 @@ def calculate_patch_hash(diff_text: str) -> str:
 
 
 def get_default_branch(repo_path: str) -> str:
-    """Detects default branch (main or master) safely."""
+    """Detects default branch (main or master) safely without interactive prompt."""
     for b in ("main", "master"):
-        check = subprocess.run(["git", "show-ref", "--verify", f"refs/heads/{b}"], cwd=repo_path, capture_output=True, text=True)
+        check = subprocess.run(["git", "show-ref", "--verify", f"refs/heads/{b}"], cwd=repo_path, capture_output=True, text=True, env=GIT_ENV)
         if check.returncode == 0:
             return b
     return "main"
 
 
-def prepare_workspace(repo_url: str) -> tuple[bool, str, str]:
+def prepare_workspace(repo_url: str, task_id: int = None) -> tuple[bool, str, str]:
     """Clones or updates an isolated directory for the repository in workspaces/."""
     BASE_WORKSPACE.mkdir(exist_ok=True)
     if not repo_url or repo_url.strip() in ("", "./", "."):
@@ -50,10 +51,10 @@ def prepare_workspace(repo_url: str) -> tuple[bool, str, str]:
     target_dir = (BASE_WORKSPACE / repo_name).resolve()
     if target_dir.exists() and (target_dir / ".git").exists():
         base_b = get_default_branch(str(target_dir))
-        subprocess.run(["git", "-C", str(target_dir), "checkout", base_b], capture_output=True, text=True)
-        subprocess.run(["git", "-C", str(target_dir), "reset", "--hard", f"origin/{base_b}"], capture_output=True, text=True)
-        subprocess.run(["git", "-C", str(target_dir), "clean", "-fd"], capture_output=True, text=True)
-        subprocess.run(["git", "-C", str(target_dir), "pull"], capture_output=True, text=True, timeout=30)
+        subprocess.run(["git", "-C", str(target_dir), "checkout", base_b], capture_output=True, text=True, env=GIT_ENV)
+        subprocess.run(["git", "-C", str(target_dir), "reset", "--hard", f"origin/{base_b}"], capture_output=True, text=True, env=GIT_ENV)
+        subprocess.run(["git", "-C", str(target_dir), "clean", "-fd"], capture_output=True, text=True, env=GIT_ENV)
+        subprocess.run(["git", "-C", str(target_dir), "pull"], capture_output=True, text=True, timeout=30, env=GIT_ENV)
         return True, str(target_dir), f"Workspace updated at {target_dir.name}"
 
     try:
@@ -62,6 +63,7 @@ def prepare_workspace(repo_url: str) -> tuple[bool, str, str]:
             capture_output=True,
             text=True,
             timeout=60,
+            env=GIT_ENV,
         )
         if res.returncode == 0:
             return True, str(target_dir), f"Successfully cloned {repo_name}"
@@ -110,16 +112,29 @@ def scan_repo_ast(workspace_path: str) -> dict:
     return summary
 
 
+DANGEROUS_SUBSTRINGS = ("rm -rf", "mkfs", "dd if=", ":(){ :|:& };:", "curl -s", "wget", "nc -e", "/dev/tcp")
+
+
 def run_sandbox_tests(repo_path: str, command: list[str] = None) -> tuple[bool, str]:
-    """Runs tests safely in a subprocess with timeout limits."""
+    """Runs tests safely in a restricted subprocess with strict timeout and environment isolation."""
     cmd = command or ["python", "-m", "unittest", "discover"]
+    cmd_str = " ".join(cmd)
+    if any(bad in cmd_str for bad in DANGEROUS_SUBSTRINGS):
+        return False, "Sandbox violation: prohibited command sequence detected."
+
+    safe_env = {
+        "PATH": os.getenv("PATH", ""),
+        "SYSTEMROOT": os.getenv("SYSTEMROOT", "C:\\Windows"),
+        "PYTHONPATH": repo_path,
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
     try:
-        proc = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, timeout=30)
+        proc = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, timeout=20, env=safe_env)
         passed = (proc.returncode == 0)
         output = proc.stdout + proc.stderr
         return passed, output.strip() or ("Tests passed" if passed else "Tests failed")
     except subprocess.TimeoutExpired:
-        return False, "Execution timed out (30s limit)."
+        return False, "Execution timed out (20s limit)."
     except Exception as e:
         return False, f"Sandbox error: {e}"
 
@@ -135,6 +150,7 @@ def apply_patch_to_dir(repo_path: str, diff_text: str) -> tuple[bool, str]:
             cwd=str(target_dir),
             capture_output=True,
             text=True,
+            env=GIT_ENV,
         )
         if check.returncode != 0:
             return False, f"Git check failed: {check.stderr}"
@@ -143,6 +159,7 @@ def apply_patch_to_dir(repo_path: str, diff_text: str) -> tuple[bool, str]:
             cwd=str(target_dir),
             capture_output=True,
             text=True,
+            env=GIT_ENV,
         )
         return (apply_res.returncode == 0), (apply_res.stderr or "Patch applied.")
     except Exception as e:
@@ -381,8 +398,8 @@ def deploy_approved_patch(workspace_path: str, repo_url: str, task_id: int, prom
     if ws == ROOT_DIR.resolve() or not (ws / ".git").exists():
         return {"html_url": compare_url, "state": "approved", "branch": branch_name, "is_external": False, "fork_url": fork_url}
 
-    subprocess.run(["git", "checkout", base_branch], cwd=str(ws), capture_output=True, text=True)
-    subprocess.run(["git", "checkout", "-B", branch_name], cwd=str(ws), capture_output=True, text=True)
+    subprocess.run(["git", "checkout", base_branch], cwd=str(ws), capture_output=True, text=True, env=GIT_ENV)
+    subprocess.run(["git", "checkout", "-B", branch_name], cwd=str(ws), capture_output=True, text=True, env=GIT_ENV)
 
     has_changes = False
     if diff_text and ("diff --git" in diff_text or "--- " in diff_text):
@@ -394,13 +411,13 @@ def deploy_approved_patch(workspace_path: str, repo_url: str, task_id: int, prom
             if str(fpath).startswith(str(ws)):
                 fpath.parent.mkdir(parents=True, exist_ok=True)
                 fpath.write_text(content, encoding="utf-8")
-        diff_res = subprocess.run(["git", "diff", "HEAD"], cwd=str(ws), capture_output=True, text=True)
+        diff_res = subprocess.run(["git", "diff", "HEAD"], cwd=str(ws), capture_output=True, text=True, env=GIT_ENV)
         diff_text = diff_res.stdout or "Direct web edit"
         has_changes = True
 
     if has_changes:
-        subprocess.run(["git", "add", "."], cwd=str(ws), capture_output=True, text=True)
-        subprocess.run(["git", "commit", "-m", f"feat(sentrix): {prompt} (Task #{task_id})"], cwd=str(ws), capture_output=True, text=True)
+        subprocess.run(["git", "add", "."], cwd=str(ws), capture_output=True, text=True, env=GIT_ENV)
+        subprocess.run(["git", "commit", "-m", f"feat(sentrix): {prompt} (Task #{task_id})"], cwd=str(ws), capture_output=True, text=True, env=GIT_ENV)
 
         token = github_token or os.getenv("GITHUB_TOKEN") or ""
 
@@ -410,7 +427,7 @@ def deploy_approved_patch(workspace_path: str, repo_url: str, task_id: int, prom
             auth_url = f"https://x-access-token:{token}@github.com/{owner}/{repo_name}.git"
             push_cmd = ["git", "push", "-u", auth_url, branch_name]
 
-        push_res = subprocess.run(push_cmd, cwd=str(ws), capture_output=True, text=True, timeout=60)
+        push_res = subprocess.run(push_cmd, cwd=str(ws), capture_output=True, text=True, timeout=60, env=GIT_ENV)
         if push_res.returncode == 0:
             pr_link = compare_url
             if token:

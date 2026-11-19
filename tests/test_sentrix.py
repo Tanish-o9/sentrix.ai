@@ -24,6 +24,11 @@ class SentrixFullFeaturesTests(TestCase):
         self.assertTrue(passed)
         self.assertIn("hello from sandbox", out)
 
+        # Prohibited command security check
+        blocked, msg = run_sandbox_tests(".", command=["rm", "-rf", "/"])
+        self.assertFalse(blocked)
+        self.assertIn("Sandbox violation", msg)
+
     def test_github_deploy_service(self):
         deploy_info = deploy_approved_patch(".", "https://github.com/sentrix-org/test-repo", 1, "Test PR", "")
         self.assertIn("html_url", deploy_info)

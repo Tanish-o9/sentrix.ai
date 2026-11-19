@@ -190,10 +190,14 @@ def run_aether_pipeline(
             "llm_error": None,
         }
 
-    # 3. Target File & Content Selection
+    # 3. Target File & Content Selection (Semantic Full-File Visibility)
     target_file = get_target_file(files, task_prompt)
     target_path = Path(workspace_path) / target_file
     target_content = target_path.read_text(encoding="utf-8", errors="ignore") if target_path.exists() else ""
+    if len(target_content) > 24000:
+        file_context = target_content[:10000] + "\n\n... [Middle code omitted for brevity] ...\n\n" + target_content[-14000:]
+    else:
+        file_context = target_content
 
     # 4. If live LLM model is ready, run live Agno multi-agent loop
     llm_error = None
@@ -207,7 +211,7 @@ def run_aether_pipeline(
             dev_prompt = (
                 f"Task: {task_prompt}\n"
                 f"Target File: {target_file}\n"
-                f"Current File Content:\n```\n{target_content[-1500:]}\n```\n"
+                f"Current File Content:\n```\n{file_context}\n```\n"
                 f"Generate a minimal, valid git unified diff modifying {target_file} to implement the task."
             )
             dev_res = developer.run(dev_prompt)

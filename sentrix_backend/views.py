@@ -115,9 +115,61 @@ def task_list_create(request: HttpRequest):
     return JsonResponse({"tasks": tasks})
 
 
+def _execute_pipeline_job(task_id: int, api_key: str = None, provider: str = None):
+    """Executes the Agno Agent pipeline in an isolated workspace."""
+    task = Task.objects.select_related("project").get(id=task_id)
+    task.status = Task.Status.PLANNING
+    task.save()
+
+    try:
+        repo_url = task.project.repo_url
+        ok, workspace_path, status_msg = prepare_workspace(repo_url, task_id=task.id)
+        ast_summary = scan_repo_ast(workspace_path)
+        repo_context = json.dumps(ast_summary)
+
+        agent_output = run_sentrix_pipeline(
+            task_prompt=task.prompt,
+            repo_context=repo_context,
+            test_runner_fn=lambda diff: run_sandbox_tests(workspace_path),
+            api_key=api_key,
+            provider=provider,
+            workspace_path=workspace_path,
+        )
+
+        task.plan = agent_output["plan"]
+        TaskStep.objects.create(task=task, agent_name="Workspace Service", step_type="WORKSPACE", output_summary=f"Cloned repository and scanned {len(ast_summary)} files.")
+        TaskStep.objects.create(task=task, agent_name="Agno Planner", step_type="PLANNING", output_summary=f"Formulated acceptance criteria targeting: {', '.join(agent_output['plan'].get('files_to_inspect', []))}")
+        TaskStep.objects.create(task=task, agent_name="Agno Developer", step_type="CODING", output_summary=agent_output["patch"]["explanation"])
+        TaskStep.objects.create(task=task, agent_name="Agno QA Agent", step_type="TEST_GENERATION", output_summary="Generated automated verification test suite.")
+        if agent_output.get("qa_retries", 0) > 0:
+            TaskStep.objects.create(task=task, agent_name="Agno Debugger", step_type="REPAIR", output_summary=f"Self-healed after {agent_output['qa_retries']} retries.")
+        TaskStep.objects.create(task=task, agent_name="Agno Reviewer", step_type="AUDIT", output_summary=str(agent_output["review"].get("reviewer_comments", "Passed")))
+
+        diff_text = agent_output["patch"].get("diff", "")
+        if diff_text and ("--- " in diff_text or "diff --git" in diff_text):
+            patch_hash = calculate_patch_hash(diff_text)
+            CodePatch.objects.update_or_create(
+                task=task,
+                defaults={"patch_hash": patch_hash, "diff": diff_text, "explanation": agent_output["patch"]["explanation"]},
+            )
+            task.status = Task.Status.AWAITING_APPROVAL
+        else:
+            CodePatch.objects.update_or_create(
+                task=task,
+                defaults={"patch_hash": "", "diff": "", "explanation": agent_output["patch"]["explanation"]},
+            )
+            task.status = Task.Status.APPROVED
+        task.save()
+        return agent_output, task
+    except Exception as e:
+        task.status = Task.Status.FAILED
+        task.save()
+        raise e
+
+
 @csrf_exempt
 def run_task(request: HttpRequest, task_id: int):
-    """Executes the Agno Agent pipeline with real workspace preparation, AST scanning & bounded QA repair."""
+    """Executes the Agno Agent pipeline with support for synchronous or non-blocking async background execution."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
@@ -126,18 +178,6 @@ def run_task(request: HttpRequest, task_id: int):
     except Task.DoesNotExist:
         return JsonResponse({"error": "Task not found"}, status=404)
 
-    task.status = Task.Status.PLANNING
-    task.save()
-
-    # 1. Prepare Workspace
-    repo_url = task.project.repo_url
-    ok, workspace_path, status_msg = prepare_workspace(repo_url)
-
-    # 2. Repository Multi-Language Scanner
-    ast_summary = scan_repo_ast(workspace_path)
-    repo_context = json.dumps(ast_summary)
-
-    # 3. Optional runtime API key
     body = {}
     try:
         body = json.loads(request.body) if request.body else {}
@@ -146,44 +186,13 @@ def run_task(request: HttpRequest, task_id: int):
     api_key = body.get("api_key")
     provider = body.get("provider")
 
-    # 4. Invoke Agno Multi-Agent Pipeline
-    agent_output = run_sentrix_pipeline(
-        task_prompt=task.prompt,
-        repo_context=repo_context,
-        test_runner_fn=lambda diff: run_sandbox_tests(workspace_path),
-        api_key=api_key,
-        provider=provider,
-        workspace_path=workspace_path,
-    )
+    if request.GET.get("async") == "1":
+        import threading
+        threading.Thread(target=_execute_pipeline_job, args=(task.id, api_key, provider), daemon=True).start()
+        return JsonResponse({"task_id": task.id, "status": "PLANNING", "async": True}, status=202)
 
-    # 5. Save Steps for Live Progress
-    task.plan = agent_output["plan"]
-    TaskStep.objects.create(task=task, agent_name="Workspace Service", step_type="WORKSPACE", output_summary=f"Cloned repository and scanned {len(ast_summary)} files.")
-    TaskStep.objects.create(task=task, agent_name="Agno Planner", step_type="PLANNING", output_summary=f"Formulated acceptance criteria targeting: {', '.join(agent_output['plan'].get('files_to_inspect', []))}")
-    TaskStep.objects.create(task=task, agent_name="Agno Developer", step_type="CODING", output_summary=agent_output["patch"]["explanation"])
-    TaskStep.objects.create(task=task, agent_name="Agno QA Agent", step_type="TEST_GENERATION", output_summary="Generated automated verification test suite.")
-    if agent_output.get("qa_retries", 0) > 0:
-        TaskStep.objects.create(task=task, agent_name="Agno Debugger", step_type="REPAIR", output_summary=f"Self-healed after {agent_output['qa_retries']} retries.")
-    TaskStep.objects.create(task=task, agent_name="Agno Reviewer", step_type="AUDIT", output_summary=str(agent_output["review"].get("reviewer_comments", "Passed")))
-
-    # 6. Save Patch with Cryptographic SHA256 Hash
-    diff_text = agent_output["patch"].get("diff", "")
-    if diff_text and ("--- " in diff_text or "diff --git" in diff_text):
-        patch_hash = calculate_patch_hash(diff_text)
-        CodePatch.objects.update_or_create(
-            task=task,
-            defaults={"patch_hash": patch_hash, "diff": diff_text, "explanation": agent_output["patch"]["explanation"]},
-        )
-        task.status = Task.Status.AWAITING_APPROVAL
-    else:
-        patch_hash = ""
-        CodePatch.objects.update_or_create(
-            task=task,
-            defaults={"patch_hash": "", "diff": "", "explanation": agent_output["patch"]["explanation"]},
-        )
-        task.status = Task.Status.APPROVED
-    task.save()
-
+    agent_output, task = _execute_pipeline_job(task.id, api_key, provider)
+    patch_hash = task.patch.patch_hash if hasattr(task, "patch") else ""
     steps = list(task.steps.values("agent_name", "step_type", "output_summary", "created_at"))
     return JsonResponse({
         "task_id": task.id,
@@ -193,10 +202,6 @@ def run_task(request: HttpRequest, task_id: int):
         "patch_hash": patch_hash,
         "review": agent_output["review"],
         "qa_retries": agent_output.get("qa_retries", 0),
-        "workspace_msg": status_msg,
-        "is_info": agent_output.get("is_info", False),
-        "llm_error": agent_output.get("llm_error"),
-        "model_used": agent_output.get("model_used", "none"),
         "steps": steps,
     })
 
